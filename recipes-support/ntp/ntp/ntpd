@@ -1,0 +1,106 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides:        ntp
+# Required-Start:  $network $remote_fs $syslog
+# Required-Stop:   $network $remote_fs $syslog
+# Default-Start:   2 3 4 5
+# Default-Stop:
+# Short-Description: Start NTP daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/bin:/usr/sbin
+
+DAEMON=/usr/sbin/ntpd
+PIDFILE=/var/run/ntpd.pid
+
+# ntpd  init.d script for ntpdc from ntp.isc.org
+test -x $DAEMON -a -r /etc/ntp.conf || exit 0
+
+# rcS contains TICKADJ
+test -r /etc/default/rcS && . /etc/default/rcS
+
+# Source function library.
+. /etc/init.d/functions
+
+# Functions to do individual actions
+settick(){
+        # If TICKADJ is set we *must* adjust it before we start, because the
+        # driftfile relies on the correct setting
+        test -n "$TICKADJ" -a -x /usr/sbin/tickadj && {
+                echo -n "Setting tick to $TICKADJ: "
+                /usr/sbin/tickadj "$TICKADJ"
+                echo "done"
+        }
+}
+startdaemon(){
+        # The -g option allows ntpd to step the time to correct it just
+        # once.  The daemon will exit if the clock drifts too much after
+        # this.  If ntpd seems to disappear after a while assume TICKADJ
+        # above is set to a totally incorrect value.
+        echo -n "Starting ntpd: "
+        start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --startas $DAEMON -- -u ntp:ntp -p $PIDFILE "$@"
+	echo "done"
+}
+stopdaemon(){
+        echo -n "Stopping ntpd: "
+        if [ -e $PIDFILE ]; then
+	  kill -9 $(cat $PIDFILE)
+	  rm -rf $PIDFILE
+	fi
+	echo "done"
+}
+
+case "$1" in
+  elo-ntp-start)
+	settick
+        startdaemon -g
+        ;;
+  elo-ntp-stop)
+	stopdaemon
+	;;
+  elo-ntp-addserver)
+        echo "driftfile /var/lib/ntp/drift" > /etc/ntp.conf
+        echo "server $2" >> /etc/ntp.conf
+        echo "restrict default" >> /etc/ntp.conf
+        ;;
+  elo-ntp-sync)
+        $0 elo-ntp-stop
+	ntpd -gq
+        ;;                                                              
+  elo-ntp-getntpserverinfo)
+	cat /etc/ntp.conf | sed -n -e 2p | awk '{print $2}'
+        ;;
+  elo-ntp-lastsynctime)
+	ntpq -c sysinfo | sed -n -e 10p | awk '{print $4,$5,$6,$7,$8}'
+        ;;
+  elo-ntp-lastsyncserver)
+	ntpq -c sysinfo | sed -n -e 9p | awk '{print $3}' | sed 's/\[//' | sed 's/\]//'
+        ;;
+  elo-ntp-force-reload)
+	stopdaemon
+        settick
+        startdaemon -g
+        ;;
+  elo-ntp-restart)
+        # Don't reset the tick here
+        stopdaemon
+        startdaemon -g
+        ;;
+  elo-ntp-reload)
+        # Must do this by hand, but don't do -g
+        stopdaemon
+        startdaemon
+        ;;
+  elo-ntp-status)
+        status /usr/sbin/ntpd;
+        exit $?
+        ;;
+  *)
+        echo "Usage: ntpd { elo-ntp-start | elo-ntp-stop | elo-ntp-status | elo-ntp-restart | elo-ntp-reload }" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
+
